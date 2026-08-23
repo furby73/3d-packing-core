@@ -1,0 +1,9 @@
+# CMake and compiler output
+build/
+out/
+.cache/
+
+*.obj
+!stanford-bunny.obj
+
+.vscode/*.log

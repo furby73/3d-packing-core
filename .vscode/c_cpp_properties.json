@@ -1,0 +1,14 @@
+{
+    "configurations": [
+        {
+            "name": "GCC",
+            "compilerPath": "C:/msys64/ucrt64/bin/c++.exe",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "windows-gcc-x64",
+            "compileCommands": "${workspaceFolder}/build/compile_commands.json",
+            "configurationProvider": "ms-vscode.cmake-tools"
+        }
+    ],
+    "version": 4
+}
