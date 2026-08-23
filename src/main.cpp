@@ -14,10 +14,11 @@
 int main(int argc, char **argv) {
     try {
         const auto printUsage = []() {
-            std::cout << "Usage: packer -t <time_seconds> [-o <output.obj>] <input1.obj> [input2.obj ...]\n"
+            std::cout << "Usage: packer [-t <time_seconds>] [-o <output.obj>] <input1.obj> [input2.obj ...]\n"
                       << "Options:\n"
                       << "  -t <seconds>  Time limit for packing (default: 60 seconds)\n"
                       << "  -o <file>     Output OBJ file (default: output.obj)\n"
+                      << "  -v            Show the version\n"
                       << "  -h            Show this help message\n";
         };
 
@@ -29,6 +30,10 @@ int main(int argc, char **argv) {
             const std::string argument = argv[i];
             if (argument == "-h" || argument == "--help") {
                 printUsage();
+                return 0;
+            }
+            if (argument == "-v" || argument == "--version") {
+                std::cout << "3D Packing Solver " << PACKER_VERSION << std::endl;
                 return 0;
             }
             if (argument == "-t") {

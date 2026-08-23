@@ -20,8 +20,13 @@ set(SOURCES
     src/MeshIO.cpp
 )
 
+if(NOT DEFINED PACKER_VERSION_STRING)
+    set(PACKER_VERSION_STRING "dev")
+endif()
+
 add_executable(packer ${SOURCES})
 target_link_libraries(packer PRIVATE tinyobjloader)
+target_compile_definitions(packer PRIVATE PACKER_VERSION="${PACKER_VERSION_STRING}")
 
 target_include_directories(packer PRIVATE src)
 

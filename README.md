@@ -32,4 +32,4 @@ Run:
 .\build\Release\packer.exe [-t seconds] [-o output.obj] input1.obj [input2.obj ...]
 ```
 
-`-t` defaults to 60 seconds. `-o` defaults to `output.obj`. Use `-h` for help.
+`-t` defaults to 60 seconds. `-o` defaults to `output.obj`. Use `-h` for help or `-v` for the version.

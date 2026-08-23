@@ -32,7 +32,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Configure CMake
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DPACKER_VERSION_STRING="${{ github.ref_name }}"
 
       - name: Build
         run: cmake --build build --config Release
