@@ -26,17 +26,38 @@ struct EnergyResult {
     float totalEnergy;
 };
 
+struct SolverState {
+    std::vector<Transform> transforms;
+    std::vector<Mat3> mats;
+    std::vector<AABB> tightBoxes;
+    std::vector<std::vector<long long>> pairCollisions;
+    long long totalCollisions = 0;
+    float volume = 0.0f;
+    float totalEnergy = 0.0f;
+};
+
 std::unique_ptr<BVHNode> buildBVH(const Mesh& mesh, std::vector<int>& tris);
 AABB transformAABB(const AABB& local, const Mat3& mat, const Vec3& pos);
+AABB computeTightAABB(const Mesh& mesh, const Mat3& mat, const Vec3& pos);
+
 long long getMeshCollisions(const BVHNode* nodeA,
-                            const Mat3& matA,
-                            const Transform& ta,
                             const Mesh& meshA,
                             const BVHNode* nodeB,
-                            const Mat3& matB,
-                            const Transform& tb,
-                            const Mesh& meshB);
-EnergyResult calculateEnergy(const std::vector<Mesh>& meshes,
-                             const std::vector<Transform>& state,
-                             float penaltyWeight,
-                             float progress);
+                            const Mesh& meshB,
+                            const Mat3& relMatBtoA,
+                            const Vec3& relPosBtoA);
+
+long long computePairCollisions(const Mesh& meshA,
+                                const Mat3& matA,
+                                const Vec3& posA,
+                                const AABB& boxA,
+                                const Mesh& meshB,
+                                const Mat3& matB,
+                                const Vec3& posB,
+                                const AABB& boxB);
+
+void recomputeTotalEnergy(SolverState& state, float penaltyWeight, float progress);
+SolverState initializeSolverState(const std::vector<Mesh>& meshes,
+                                  const std::vector<Transform>& initialTransforms,
+                                  float penaltyWeight,
+                                  float progress);
