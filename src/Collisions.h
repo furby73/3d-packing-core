@@ -18,6 +18,8 @@ struct Mesh {
     std::vector<Vec3> vertices;
     std::vector<int> indices;
     std::unique_ptr<BVHNode> bvh_root;
+    // Offset subtracted from the input vertices to center the mesh on its origin
+    Vec3 centroid = {0.0f, 0.0f, 0.0f};
 };
 
 struct EnergyResult {

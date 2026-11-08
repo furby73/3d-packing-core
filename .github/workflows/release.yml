@@ -15,24 +15,36 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
         include:
+          # Static runtimes so the binaries, also bundled in the Blender extension, run without extra installs
           - os: ubuntu-latest
             artifact_name: packer-linux
             executable: packer
+            platform: linux-x64
+            cmake_args: '-DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc"'
           - os: windows-latest
             artifact_name: packer-windows.exe
             executable: Release/packer.exe
+            platform: windows-x64
+            cmake_args: '-DCMAKE_POLICY_DEFAULT_CMP0091=NEW -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded'
           - os: macos-latest
             artifact_name: packer-macos
             executable: packer
+            platform: macos-arm64
+            cmake_args: '-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0'
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Configure CMake
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DPACKER_VERSION_STRING="${{ github.ref_name }}"
+        shell: bash
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DPACKER_VERSION_STRING="${{ github.ref_name }}" ${{ matrix.cmake_args }}
 
       - name: Build
         run: cmake --build build --config Release
@@ -43,11 +55,20 @@ jobs:
           cd build
           mv ${{ matrix.executable }} ../${{ matrix.artifact_name }}
 
+      - name: Package Blender extension
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          [[ "$GITHUB_REF" == refs/tags/v* ]] || version="0.0.0-dev+${GITHUB_SHA::7}"
+          python blender/build_extension.py --binary ${{ matrix.artifact_name }} --platform ${{ matrix.platform }} --version "$version" --output-dir .
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.artifact_name }}
+          path: |
+            ${{ matrix.artifact_name }}
+            mesh_packer-*.zip
 
   release:
     name: Create GitHub Release

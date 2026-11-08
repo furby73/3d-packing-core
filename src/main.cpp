@@ -1,6 +1,7 @@
 #include <chrono>
 #include <cmath>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <random>
@@ -14,16 +15,19 @@
 int main(int argc, char** argv) {
     try {
         const auto printUsage = []() {
-            std::cout << "Usage: packer [-t <time_seconds>] [-o <output.obj>] <input1.obj> [input2.obj ...]\n"
+            std::cout << "Usage: packer [-t <time_seconds>] [-o <output.obj>] [-m <transforms.txt>] <input1.obj> "
+                         "[input2.obj ...]\n"
                       << "Options:\n"
                       << "  -t <seconds>  Time limit for packing (default: 60 seconds)\n"
-                      << "  -o <file>     Output OBJ file (default: output.obj)\n"
+                      << "  -o <file>     Output OBJ file (default: output.obj, or none when -m is given)\n"
+                      << "  -m <file>     Output each input's placement as a row-major 3x4 matrix, one line per mesh\n"
                       << "  -v            Show the version\n"
                       << "  -h            Show this help message\n";
         };
 
         float maxTimeSeconds = 60.0f;
-        std::string outputFile = "output.obj";
+        std::string outputFile;
+        std::string transformsFile;
         std::vector<Mesh> meshes;
 
         for (int i = 1; i < argc; ++i) {
@@ -46,6 +50,11 @@ int main(int argc, char** argv) {
                     throw std::invalid_argument("-o requires a filename");
                 }
                 outputFile = argv[i];
+            } else if (argument == "-m") {
+                if (++i >= argc) {
+                    throw std::invalid_argument("-m requires a filename");
+                }
+                transformsFile = argv[i];
             } else if (!argument.empty() && argument[0] == '-') {
                 throw std::invalid_argument("unknown option: " + argument);
             } else {
@@ -61,6 +70,9 @@ int main(int argc, char** argv) {
         if (meshes.empty()) {
             printUsage();
             throw std::invalid_argument("at least one input OBJ file is required");
+        }
+        if (outputFile.empty() && transformsFile.empty()) {
+            outputFile = "output.obj";
         }
 
         const size_t numMeshes = meshes.size();
@@ -113,6 +125,7 @@ int main(int argc, char** argv) {
         const auto startTime = std::chrono::steady_clock::now();
         long long iteration = 0;
         float progress = 0.0f;
+        int reportedPercent = -1;
         float temperature = startTemp;
 
         std::vector<long long> oldRowA(numMeshes);
@@ -273,49 +286,90 @@ int main(int argc, char** argv) {
                 // Refresh current totalEnergy so it stays synchronized with the updated progress weight
                 recomputeTotalEnergy(state, penaltyWeight, progress);
 
-                if (iteration % 5000 == 0) {
-                    std::cout << "Prog: " << static_cast<int>(progress * 100) << "% | Iter: " << iteration
-                              << " | Temp: " << temperature << " | Vol: " << state.volume
+                // One flushed line per percent, so programs reading stdout get live progress
+                const int percent = static_cast<int>(progress * 100);
+                if (percent != reportedPercent) {
+                    reportedPercent = percent;
+                    std::cout << "Prog: " << percent << "% | Iter: " << iteration << " | Temp: " << temperature
+                              << " | Vol: " << state.volume
                               << " | BestVol: " << (bestVolume < std::numeric_limits<float>::max() ? bestVolume : -1.0f)
-                              << " | Coll: " << state.totalCollisions << "\n";
+                              << " | Coll: " << state.totalCollisions << std::endl;
                 }
             }
         }
 
         const bool foundZeroCollision = (bestVolume < std::numeric_limits<float>::max());
-        const std::vector<Transform>& finalTransforms = foundZeroCollision ? bestZeroCollState : fallbackState;
+        std::vector<Transform> finalTransforms = foundZeroCollision ? bestZeroCollState : fallbackState;
 
-        std::ofstream out(outputFile);
-        if (!out.is_open()) {
-            std::cerr << "Failed to open output file: " << outputFile << "\n";
-            return 1;
+        // Moving every mesh together doesn't change the energy, so the arrangement drifts during annealing.
+        // Center its bounding box on the origin to give a stable result.
+        AABB packedBox;
+        for (size_t i = 0; i < numMeshes; ++i) {
+            packedBox.expand(computeTightAABB(meshes[i], finalTransforms[i].getMatrix(), finalTransforms[i].pos));
+        }
+        const Vec3 packedCenter = packedBox.center();
+        for (Transform& t : finalTransforms) {
+            t.pos = t.pos - packedCenter;
         }
 
-        int vOffset = 1;
-        for (size_t i = 0; i < meshes.size(); ++i) {
-            out << "o Object_" << i << "\n";
-            const Mat3 mat = finalTransforms[i].getMatrix();
-
-            for (const Vec3& v : meshes[i].vertices) {
-                const Vec3 tv = mat.transform(v) + finalTransforms[i].pos;
-                out << "v " << tv.x << " " << tv.y << " " << tv.z << "\n";
+        if (!outputFile.empty()) {
+            std::ofstream out(outputFile);
+            if (!out.is_open()) {
+                std::cerr << "Failed to open output file: " << outputFile << "\n";
+                return 1;
             }
 
-            for (size_t j = 0; j < meshes[i].indices.size(); j += 3) {
-                out << "f " << meshes[i].indices[j] + vOffset << " " << meshes[i].indices[j + 1] + vOffset << " "
-                    << meshes[i].indices[j + 2] + vOffset << "\n";
+            int vOffset = 1;
+            for (size_t i = 0; i < meshes.size(); ++i) {
+                out << "o Object_" << i << "\n";
+                const Mat3 mat = finalTransforms[i].getMatrix();
+
+                for (const Vec3& v : meshes[i].vertices) {
+                    const Vec3 tv = mat.transform(v) + finalTransforms[i].pos;
+                    out << "v " << tv.x << " " << tv.y << " " << tv.z << "\n";
+                }
+
+                for (size_t j = 0; j < meshes[i].indices.size(); j += 3) {
+                    out << "f " << meshes[i].indices[j] + vOffset << " " << meshes[i].indices[j + 1] + vOffset << " "
+                        << meshes[i].indices[j + 2] + vOffset << "\n";
+                }
+
+                vOffset += static_cast<int>(meshes[i].vertices.size());
+            }
+        }
+
+        if (!transformsFile.empty()) {
+            std::ofstream out(transformsFile);
+            if (!out.is_open()) {
+                std::cerr << "Failed to open transforms file: " << transformsFile << "\n";
+                return 1;
             }
 
-            vOffset += static_cast<int>(meshes[i].vertices.size());
+            // Maps an input vertex v to R * (v - centroid) + pos, written as [R | pos - R * centroid]
+            out << std::setprecision(9);
+            for (size_t i = 0; i < meshes.size(); ++i) {
+                const Mat3 mat = finalTransforms[i].getMatrix();
+                const Vec3 t = finalTransforms[i].pos - mat.transform(meshes[i].centroid);
+                const float tRow[3] = {t.x, t.y, t.z};
+                for (int r = 0; r < 3; ++r) {
+                    out << mat.m[r][0] << " " << mat.m[r][1] << " " << mat.m[r][2] << " " << tRow[r]
+                        << (r < 2 ? " " : "\n");
+                }
+            }
+        }
+
+        std::string savedTo = outputFile;
+        if (!transformsFile.empty()) {
+            savedTo += (savedTo.empty() ? "" : " and ") + transformsFile;
         }
 
         if (!foundZeroCollision) {
             std::cout << "Done! (" << iteration << " iterations). No 0-collision configuration found in time budget. "
                       << "Saved lowest-collision state (Collisions: " << fallbackCollisions
-                      << ", Vol: " << fallbackVolume << ") to " << outputFile << std::endl;
+                      << ", Vol: " << fallbackVolume << ") to " << savedTo << std::endl;
         } else {
             std::cout << "Done! (" << iteration << " iterations). Final best 0-collision volume: " << bestVolume
-                      << ". Saved to " << outputFile << std::endl;
+                      << ". Saved to " << savedTo << std::endl;
         }
         return 0;
     } catch (const std::exception& ex) {

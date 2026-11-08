@@ -7,3 +7,8 @@ out/
 !stanford-bunny.obj
 
 .vscode/*.log
+
+# Blender extension builds
+dist/
+blender/mesh_packer/bin/
+__pycache__/

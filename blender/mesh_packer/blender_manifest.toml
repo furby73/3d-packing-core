@@ -1,0 +1,18 @@
+schema_version = "1.0.0"
+
+id = "mesh_packer"
+# Replaced with the release tag's version by blender/build_extension.py
+version = "0.0.0"
+name = "Mesh Packer"
+tagline = "Pack every mesh in the scene tightly without overlaps"
+maintainer = "furby73"
+type = "add-on"
+
+tags = ["Object", "Mesh"]
+
+blender_version_min = "4.2.0"
+
+license = ["SPDX:GPL-3.0-or-later"]
+
+[permissions]
+files = "Writes meshes to a temporary folder for the packing solver"

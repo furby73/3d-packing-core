@@ -43,6 +43,7 @@ void loadAndPrepareMesh(const std::string& filename, std::vector<Mesh>& meshes) 
             v = v - centroid;
         }
     }
+    mesh.centroid = centroid;
 
     std::cout << "  Building BVH for " << (mesh.indices.size() / 3) << " triangles..." << std::endl;
     mesh.bvh_root = buildBVH(mesh, tris);
