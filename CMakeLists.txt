@@ -35,7 +35,13 @@ target_include_directories(packer PRIVATE src)
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(packer PRIVATE -O3)
 elseif(MSVC)
-    target_compile_options(packer PRIVATE /O2 /Ob2 /Oi /Ot /fp:precise)
+    target_compile_options(packer PRIVATE
+        $<$<CONFIG:Release>:/O2>
+        $<$<CONFIG:Release>:/Ob2>
+        $<$<CONFIG:Release>:/Oi>
+        $<$<CONFIG:Release>:/Ot>
+        $<$<CONFIG:Release>:/fp:precise>
+    )
 endif()
 
 include(CTest)

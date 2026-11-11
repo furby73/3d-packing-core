@@ -6,6 +6,7 @@
 #include <numeric>
 #include <random>
 #include <stdexcept>
+#include <string>
 
 namespace {
 using Clock = std::chrono::steady_clock;
