@@ -1,0 +1,6 @@
+numpy==2.3.5
+trimesh==5.2.0
+python-fcl==0.7.0.11
+rtree==1.4.1
+plyfile==1.1.5
+matplotlib>=3.8

@@ -12,9 +12,13 @@ import bpy
 import numpy as np
 from mathutils import Matrix
 
+from .result import load_result
+
 EXECUTABLE_NAME = "packer.exe" if sys.platform == "win32" else "packer"
 TRANSFORMS_FILE = "transforms.txt"
+MANIFEST_FILE = "packing.json"
 PROGRESS_LINE = re.compile(r"Prog: (\d+)%")
+TRYING_LINE = re.compile(r"Trying: (\d+)")
 
 
 class MeshPackerPreferences(bpy.types.AddonPreferences):
@@ -31,13 +35,38 @@ class MeshPackerPreferences(bpy.types.AddonPreferences):
 
 
 class MeshPackerSettings(bpy.types.PropertyGroup):
+    algorithm: bpy.props.EnumProperty(
+        name="Algorithm",
+        items=[("anneal", "Simulated Annealing", "Repair conflicts using annealing"),
+               ("constructive", "Constructive Backtracking", "Build valid layouts with randomized insertion and backtracking")],
+        default="anneal",
+    )
+
     time_limit: bpy.props.FloatProperty(
         name="Time Limit",
-        description="How long the solver searches for a tighter packing",
+        description="Time spent searching for fewer containers, excluding mesh preparation",
         default=10.0,
         min=0.1,
         soft_max=600.0,
         unit='TIME_ABSOLUTE',
+    )
+
+
+    width: bpy.props.FloatProperty(
+        name="Width (X)", description="Maximum container width in scene units",
+        default=10.0, min=0.000001, unit='LENGTH', precision=4,
+    )
+    length: bpy.props.FloatProperty(
+        name="Length (Y)", description="Maximum container length in scene units",
+        default=10.0, min=0.000001, unit='LENGTH', precision=4,
+    )
+    height: bpy.props.FloatProperty(
+        name="Height (Z)", description="Maximum container height in scene units",
+        default=10.0, min=0.000001, unit='LENGTH', precision=4,
+    )
+    gap: bpy.props.FloatProperty(
+        name="Part Gap", description="Minimum surface distance between parts; no extra wall clearance",
+        default=0.0, min=0.0, unit='LENGTH', precision=4,
     )
 
 
@@ -116,9 +145,15 @@ class PackJob:
             if not files:
                 raise RuntimeError("No visible meshes to pack")
 
+            settings = context.scene.mesh_packer
+            self.dimensions = (settings.width, settings.length, settings.height)
+            self.gap = settings.gap
             # Relative paths keep the command line short when packing many objects
             self.process = subprocess.Popen(
-                [packer, "-t", f"{context.scene.mesh_packer.time_limit:g}", "-m", TRANSFORMS_FILE, *files],
+                [packer, "--algorithm", settings.algorithm, "-t", f"{settings.time_limit:.17g}",
+                 "--width", f"{settings.width:.17g}", "--length", f"{settings.length:.17g}",
+                 "--height", f"{settings.height:.17g}", "--gap", f"{settings.gap:.17g}",
+                 "-m", TRANSFORMS_FILE, "--manifest", MANIFEST_FILE, *files],
                 cwd=self.work_dir,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
@@ -132,6 +167,7 @@ class PackJob:
             raise
 
         self.progress = None
+        self.trying_bins = 0
         self.last_line = ""
         self._reader = threading.Thread(target=self._read_output, daemon=True)
         self._reader.start()
@@ -142,19 +178,26 @@ class PackJob:
             match = PROGRESS_LINE.match(self.last_line)
             if match:
                 self.progress = int(match.group(1)) / 100
+            attempt = TRYING_LINE.search(self.last_line)
+            if attempt:
+                self.trying_bins = int(attempt.group(1))
 
     def read_placements(self):
         self.process.wait()
         self._reader.join()
         if self.process.returncode != 0:
             raise RuntimeError(f"Packing solver failed: {self.last_line}")
-        with open(os.path.join(self.work_dir, TRANSFORMS_FILE), encoding="ascii") as f:
-            rows = [[float(x) for x in line.split()] for line in f]
-        return [Matrix((row[0:4], row[4:8], row[8:12], (0.0, 0.0, 0.0, 1.0))) for row in rows]
+        placements, self.bin_offsets = load_result(
+            os.path.join(self.work_dir, MANIFEST_FILE), len(self.objects), self.dimensions, self.gap,
+        )
+        return [(container, Matrix((row[0:4], row[4:8], row[8:12], (0.0, 0.0, 0.0, 1.0))))
+                for container, row in placements]
 
     def cancel(self):
-        self.process.kill()
+        if self.process.poll() is None:
+            self.process.kill()
         self.process.wait()
+        self._reader.join()
         self.cleanup()
 
     def cleanup(self):
@@ -162,7 +205,7 @@ class PackJob:
 
 
 class OBJECT_OT_pack_meshes(bpy.types.Operator):
-    """Select every visible mesh and pack them as tightly as possible without overlaps"""
+    """Pack visible meshes into as few containers as possible with the requested part gap"""
 
     bl_idname = "object.pack_meshes"
     bl_label = "Pack All Meshes"
@@ -179,7 +222,7 @@ class OBJECT_OT_pack_meshes(bpy.types.Operator):
         except (OSError, RuntimeError) as ex:
             self.report({'ERROR'}, str(ex))
             return {'CANCELLED'}
-        return self.finish(job)
+        return self.finish(context, job)
 
     def invoke(self, context, event):
         try:
@@ -207,37 +250,71 @@ class OBJECT_OT_pack_meshes(bpy.types.Operator):
                 self.update_status()
             else:
                 self.stop_modal(context)
-                return self.finish(self._job)
+                return self.finish(context, self._job)
         return {'PASS_THROUGH'}
 
     def update_status(self):
         progress = self._job.progress
         state = "loading meshes" if progress is None else f"{progress:.0%}"
+        if self._job.trying_bins:
+            state += f", trying {self._job.trying_bins} containers"
         self._workspace.status_text_set(f"Packing {len(self._job.objects)} meshes: {state}  (Esc to cancel)")
 
     def stop_modal(self, context):
         context.window_manager.event_timer_remove(self._timer)
         self._workspace.status_text_set(None)
 
-    def finish(self, job):
+    def finish(self, context, job):
         try:
             placements = job.read_placements()
-        except (OSError, RuntimeError) as ex:
+            targets = []
+            for (name, original), (container, placement) in zip(job.objects, placements):
+                ob = bpy.data.objects.get(name)
+                if ob is None:
+                    raise RuntimeError(f"Object {name} was removed or renamed during packing")
+                if any(abs(ob.matrix_world[r][c] - original[r][c]) > 1e-6
+                       for r in range(4) for c in range(4)):
+                    raise RuntimeError(f"Object {name} moved during packing; run packing again")
+                targets.append((ob, original, placement @ original, container, ob.get("mesh_packer_bin")))
+        except (OSError, RuntimeError, ValueError, KeyError, TypeError) as ex:
             self.report({'ERROR'}, str(ex))
             return {'CANCELLED'}
         finally:
             job.cleanup()
 
-        targets = []
-        for (name, matrix), placement in zip(job.objects, placements):
-            ob = bpy.data.objects.get(name)
-            if ob is not None:
-                targets.append((ob, placement @ matrix))
-        # Parents first, so children are placed relative to their parent's new transform
-        for ob, matrix in sorted(targets, key=lambda target: hierarchy_depth(target[0])):
-            ob.matrix_world = matrix
-
-        self.report({'INFO'}, f"Packed {len(targets)} meshes")
+        guides = None
+        try:
+            # Apply parents first to preserve the saved world-space placements.
+            for ob, _, matrix, container, _ in sorted(targets, key=lambda item: hierarchy_depth(item[0])):
+                ob.matrix_world = matrix
+                ob["mesh_packer_bin"] = container + 1
+                context.view_layer.update()
+            guides = bpy.data.collections.new("Packing Containers")
+            context.scene.collection.children.link(guides)
+            for container, offset in sorted(job.bin_offsets.items()):
+                guide = bpy.data.objects.new(f"Packing Bin {container + 1}", None)
+                guides.objects.link(guide)
+                guide.empty_display_type = 'CUBE'
+                guide.empty_display_size = 1.0
+                guide.location = tuple(offset[i] + job.dimensions[i] / 2 for i in range(3))
+                guide.scale = tuple(d / 2 for d in job.dimensions)
+                guide.show_in_front = True
+                guide["mesh_packer_container"] = container + 1
+        except Exception as ex:
+            for ob, original, _, _, previous_bin in sorted(targets, key=lambda item: hierarchy_depth(item[0])):
+                ob.matrix_world = original
+                if previous_bin is None:
+                    ob.pop("mesh_packer_bin", None)
+                else:
+                    ob["mesh_packer_bin"] = previous_bin
+                context.view_layer.update()
+            if guides is not None:
+                for guide in list(guides.objects):
+                    bpy.data.objects.remove(guide, do_unlink=True)
+                bpy.data.collections.remove(guides)
+            self.report({'ERROR'}, f"Could not apply packing: {ex}")
+            return {'CANCELLED'}
+        self.report({'INFO'}, f"Packed {len(targets)} meshes into {len(job.bin_offsets)} containers")
         return {'FINISHED'}
 
 
@@ -251,7 +328,13 @@ class VIEW3D_PT_mesh_packer(bpy.types.Panel):
         layout = self.layout
         layout.use_property_split = True
         layout.use_property_decorate = False
-        layout.prop(context.scene.mesh_packer, "time_limit")
+        settings = context.scene.mesh_packer
+        layout.prop(settings, "width")
+        layout.prop(settings, "length")
+        layout.prop(settings, "height")
+        layout.prop(settings, "gap")
+        layout.prop(settings, "time_limit")
+        layout.prop(settings, "algorithm")
         layout.operator(OBJECT_OT_pack_meshes.bl_idname, icon='PACKAGE')
 
 

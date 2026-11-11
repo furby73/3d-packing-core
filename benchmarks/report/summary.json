@@ -1,0 +1,21 @@
+{
+  "runs": 160,
+  "valid": 160,
+  "pairs": 80,
+  "wins": {
+    "tie": 62,
+    "constructive": 1,
+    "anneal": 17
+  },
+  "completed_baseline_wins": {
+    "tie": 59,
+    "constructive": 1
+  },
+  "baseline_count_mismatches": 0,
+  "baseline_timeouts": 40,
+  "fallback": 0,
+  "surface_pairs": 2693,
+  "closed_pairs": 255,
+  "open_pairs": 2438,
+  "improved_over_baseline": 59
+}

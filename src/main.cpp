@@ -1,379 +1,295 @@
-#include <chrono>
+#include <array>
 #include <cmath>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <limits>
-#include <random>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
-#include "Collisions.h"
 #include "MeshIO.h"
+#include "Packing.h"
 
-int main(int argc, char** argv) {
+namespace {
+namespace fs = std::filesystem;
+void usage() {
+    std::cout << "Usage: packer --width W --height H --length L [--gap G] [options] input.obj ...\n"
+              << "  --width,  -w W    Container width (X)\n"
+              << "  --height, -H H    Container height (Z)\n"
+              << "  --length, -l L    Container length (Y)\n"
+              << "  --gap,    -g G    Minimum surface clearance between models (default 0)\n"
+              << "  -t seconds        Improvement time budget, excluding preparation and I/O (default 60)\n"
+              << "  -o output.obj     Preview OBJ; also writes one local OBJ per bin for multiple bins\n"
+              << "  -m transforms.txt One display placement matrix per input (12 values per row)\n"
+              << "  --manifest path   JSON with bin membership and local matrices (default <output>.json)\n"
+              << "  --algorithm NAME  anneal (default) or constructive (randomized backtracking)\n"
+              << "  --seed N          Random seed (default 42)\n"
+              << "  -h, --help        Show help\n"
+              << "  -v, --version     Show version\n"
+              << "All dimensions and clearance use input coordinate units. Walls need no extra gap.\n"
+              << "The heuristic minimizes bin count; it does not certify global optimality.\n";
+}
+
+double number(const std::string &text) {
+    size_t used = 0;
+    const double value = std::stod(text, &used);
+    if (used != text.size() || !std::isfinite(value))
+        throw std::invalid_argument("Invalid number: " + text);
+    return value;
+}
+std::string jsonString(const std::string &value) {
+    std::ostringstream out;
+    out << '"';
+    for (unsigned char c : value) {
+        switch (c) {
+        case '"':
+            out << "\\\"";
+            break;
+        case '\\':
+            out << "\\\\";
+            break;
+        case '\n':
+            out << "\\n";
+            break;
+        case '\r':
+            out << "\\r";
+            break;
+        case '\t':
+            out << "\\t";
+            break;
+        default:
+            if (c < 32)
+                out << "\\u" << std::hex << std::setw(4) << std::setfill('0') << int(c) << std::dec;
+            else
+                out << c;
+        }
+    }
+    out << '"';
+    return out.str();
+}
+std::array<double, 12> matrix(const Mesh &mesh, const Placement &placement, double displayOffset = 0) {
+    const Mat3 r = placement.transform.getMatrix();
+    Vec3 t = placement.transform.pos - r.transform(mesh.centroid);
+    t.x += displayOffset;
+    const double xyz[] = {t.x, t.y, t.z};
+    std::array<double, 12> out{};
+    for (int row = 0; row < 3; ++row) {
+        for (int col = 0; col < 3; ++col)
+            out[row * 4 + col] = r.m[row][col];
+        out[row * 4 + 3] = xyz[row];
+    }
+    return out;
+}
+std::ofstream output(const std::string &path) {
+    std::ofstream out;
+    out.exceptions(std::ios::failbit | std::ios::badbit);
+    out.open(path);
+    out << std::setprecision(17);
+    return out;
+}
+void writeObj(const std::string &path, const std::vector<Mesh> &meshes, const PackingResult &result, double stride,
+              size_t onlyBin = std::numeric_limits<size_t>::max()) {
+    auto out = output(path);
+    size_t offset = 1;
+    for (size_t i = 0; i < meshes.size(); ++i) {
+        const auto &p = result.placements[i];
+        if (onlyBin != std::numeric_limits<size_t>::max() && p.bin != onlyBin)
+            continue;
+        out << "o bin_" << p.bin + 1 << "_mesh_" << i + 1 << '\n';
+        const Mat3 r = p.transform.getMatrix();
+        for (const Vec3 &v : meshes[i].vertices) {
+            Vec3 point = r.transform(v) + p.transform.pos;
+            if (onlyBin == std::numeric_limits<size_t>::max())
+                point.x += p.bin * stride;
+            out << "v " << point.x << ' ' << point.y << ' ' << point.z << '\n';
+        }
+        for (size_t j = 0; j < meshes[i].indices.size(); j += 3)
+            out << "f " << meshes[i].indices[j] + offset << ' ' << meshes[i].indices[j + 1] + offset << ' '
+                << meshes[i].indices[j + 2] + offset << '\n';
+        offset += meshes[i].vertices.size();
+    }
+    out.close();
+}
+} // namespace
+
+int main(int argc, char **argv) {
     try {
-        const auto printUsage = []() {
-            std::cout << "Usage: packer [-t <time_seconds>] [-o <output.obj>] [-m <transforms.txt>] <input1.obj> "
-                         "[input2.obj ...]\n"
-                      << "Options:\n"
-                      << "  -t <seconds>  Time limit for packing (default: 60 seconds)\n"
-                      << "  -o <file>     Output OBJ file (default: output.obj, or none when -m is given)\n"
-                      << "  -m <file>     Output each input's placement as a row-major 3x4 matrix, one line per mesh\n"
-                      << "  -v            Show the version\n"
-                      << "  -h            Show this help message\n";
-        };
-
-        float maxTimeSeconds = 60.0f;
-        std::string outputFile;
-        std::string transformsFile;
-        std::vector<Mesh> meshes;
-
+        PackingOptions options{{0, 0, 0}};
+        std::string objFile, transformsFile, manifestFile;
+        std::vector<std::string> inputs;
+        bool positional = false;
         for (int i = 1; i < argc; ++i) {
-            const std::string argument = argv[i];
-            if (argument == "-h" || argument == "--help") {
-                printUsage();
-                return 0;
-            }
-            if (argument == "-v" || argument == "--version") {
-                std::cout << "3D Packing Solver " << PACKER_VERSION << std::endl;
-                return 0;
-            }
-            if (argument == "-t") {
-                if (++i >= argc) {
-                    throw std::invalid_argument("-t requires a value");
-                }
-                maxTimeSeconds = std::stof(argv[i]);
-            } else if (argument == "-o") {
-                if (++i >= argc) {
-                    throw std::invalid_argument("-o requires a filename");
-                }
-                outputFile = argv[i];
-            } else if (argument == "-m") {
-                if (++i >= argc) {
-                    throw std::invalid_argument("-m requires a filename");
-                }
-                transformsFile = argv[i];
-            } else if (!argument.empty() && argument[0] == '-') {
-                throw std::invalid_argument("unknown option: " + argument);
-            } else {
-                std::cout << "Loading " << argument << "..." << std::endl;
-                loadAndPrepareMesh(argument.c_str(), meshes);
-            }
-        }
-
-        if (!std::isfinite(maxTimeSeconds) || maxTimeSeconds <= 0.0f) {
-            printUsage();
-            throw std::invalid_argument("-t must specify a positive number of seconds");
-        }
-        if (meshes.empty()) {
-            printUsage();
-            throw std::invalid_argument("at least one input OBJ file is required");
-        }
-        if (outputFile.empty() && transformsFile.empty()) {
-            outputFile = "output.obj";
-        }
-
-        const size_t numMeshes = meshes.size();
-        float maxDiag = 0.0f;
-        float sumVolume = 0.0f;
-        for (const Mesh& m : meshes) {
-            const Vec3 ext = m.bvh_root->box.max - m.bvh_root->box.min;
-            maxDiag = std::max(maxDiag, ext.length());
-            sumVolume += std::max(1e-6f, m.bvh_root->box.volume());
-        }
-
-        std::mt19937 rng(42);
-        std::uniform_real_distribution<float> unitDist(0.0f, 1.0f);
-
-        // Initialize meshes in a loose 3D grid so they start mostly collision-free
-        const int gridSide = static_cast<int>(std::ceil(std::cbrt(static_cast<float>(numMeshes))));
-        const float spacing = maxDiag * 0.75f;
-        std::vector<Transform> initTransforms(numMeshes);
-        for (size_t i = 0; i < numMeshes; ++i) {
-            const int gx = static_cast<int>(i) % gridSide;
-            const int gy = (static_cast<int>(i) / gridSide) % gridSide;
-            const int gz = static_cast<int>(i) / (gridSide * gridSide);
-            initTransforms[i].pos = {
-                (gx - 0.5f * (gridSide - 1)) * spacing,
-                (gy - 0.5f * (gridSide - 1)) * spacing,
-                (gz - 0.5f * (gridSide - 1)) * spacing,
+            const std::string arg = argv[i];
+            auto value = [&]() {
+                if (++i >= argc)
+                    throw std::invalid_argument(arg + " requires a value");
+                return std::string(argv[i]);
             };
-            initTransforms[i].rot = {0.0f, 0.0f, 0.0f};
-        }
-
-        // Scale temperature and penalty weight to the actual volume of the input meshes
-        const float startTemp = sumVolume * 0.5f;
-        const float endTemp = sumVolume * 1e-5f;
-        const float penaltyWeight = sumVolume * 0.05f;
-
-        std::cout << "Validating initial state exact collisions..." << std::endl;
-        SolverState state = initializeSolverState(meshes, initTransforms, penaltyWeight, 0.0f);
-
-        std::vector<Transform> bestZeroCollState = state.transforms;
-        float bestVolume = std::numeric_limits<float>::max();
-        if (state.totalCollisions == 0) {
-            bestVolume = state.volume;
-        }
-
-        std::vector<Transform> fallbackState = state.transforms;
-        long long fallbackCollisions = state.totalCollisions;
-        float fallbackVolume = state.volume;
-
-        std::cout << "Starting Incremental BVH Annealing for " << maxTimeSeconds << "s..." << std::endl;
-        const auto startTime = std::chrono::steady_clock::now();
-        long long iteration = 0;
-        float progress = 0.0f;
-        int reportedPercent = -1;
-        float temperature = startTemp;
-
-        std::vector<long long> oldRowA(numMeshes);
-        std::vector<long long> oldRowB(numMeshes);
-
-        while (progress < 1.0f) {
-            const float moveRoll = unitDist(rng);
-            const size_t idxA = rng() % numMeshes;
-
-            // 10% chance to swap positions of two distinct meshes
-            if (numMeshes > 1 && moveRoll >= 0.90f) {
-                size_t idxB = rng() % (numMeshes - 1);
-                if (idxB >= idxA) {
-                    ++idxB;
-                }
-
-                const Transform oldTransA = state.transforms[idxA];
-                const Transform oldTransB = state.transforms[idxB];
-                const AABB oldBoxA = state.tightBoxes[idxA];
-                const AABB oldBoxB = state.tightBoxes[idxB];
-                const long long oldTotalCollisions = state.totalCollisions;
-                const float oldVolume = state.volume;
-                const float oldEnergy = state.totalEnergy;
-
-                for (size_t j = 0; j < numMeshes; ++j) {
-                    oldRowA[j] = state.pairCollisions[idxA][j];
-                    oldRowB[j] = state.pairCollisions[idxB][j];
-                }
-
-                std::swap(state.transforms[idxA].pos, state.transforms[idxB].pos);
-                state.tightBoxes[idxA] = computeTightAABB(meshes[idxA], state.mats[idxA], state.transforms[idxA].pos);
-                state.tightBoxes[idxB] = computeTightAABB(meshes[idxB], state.mats[idxB], state.transforms[idxB].pos);
-
-                for (size_t j = 0; j < numMeshes; ++j) {
-                    if (j == idxA || j == idxB) continue;
-                    state.totalCollisions -= state.pairCollisions[idxA][j];
-                    state.totalCollisions -= state.pairCollisions[idxB][j];
-
-                    const long long cA = computePairCollisions(
-                        meshes[idxA], state.mats[idxA], state.transforms[idxA].pos, state.tightBoxes[idxA],
-                        meshes[j], state.mats[j], state.transforms[j].pos, state.tightBoxes[j]);
-                    const long long cB = computePairCollisions(
-                        meshes[idxB], state.mats[idxB], state.transforms[idxB].pos, state.tightBoxes[idxB],
-                        meshes[j], state.mats[j], state.transforms[j].pos, state.tightBoxes[j]);
-
-                    state.pairCollisions[idxA][j] = state.pairCollisions[j][idxA] = cA;
-                    state.pairCollisions[idxB][j] = state.pairCollisions[j][idxB] = cB;
-                    state.totalCollisions += cA + cB;
-                }
-
-                state.totalCollisions -= state.pairCollisions[idxA][idxB];
-                const long long cAB = computePairCollisions(
-                    meshes[idxA], state.mats[idxA], state.transforms[idxA].pos, state.tightBoxes[idxA],
-                    meshes[idxB], state.mats[idxB], state.transforms[idxB].pos, state.tightBoxes[idxB]);
-                state.pairCollisions[idxA][idxB] = state.pairCollisions[idxB][idxA] = cAB;
-                state.totalCollisions += cAB;
-
-                recomputeTotalEnergy(state, penaltyWeight, progress);
-                const float diff = state.totalEnergy - oldEnergy;
-
-                if (!(diff < 0.0f || std::exp(-diff / temperature) > unitDist(rng))) {
-                    state.transforms[idxA] = oldTransA;
-                    state.transforms[idxB] = oldTransB;
-                    state.tightBoxes[idxA] = oldBoxA;
-                    state.tightBoxes[idxB] = oldBoxB;
-                    for (size_t j = 0; j < numMeshes; ++j) {
-                        state.pairCollisions[idxA][j] = state.pairCollisions[j][idxA] = oldRowA[j];
-                        state.pairCollisions[idxB][j] = state.pairCollisions[j][idxB] = oldRowB[j];
-                    }
-                    state.totalCollisions = oldTotalCollisions;
-                    state.volume = oldVolume;
-                    state.totalEnergy = oldEnergy;
-                }
-            } else {
-                // Single-mesh perturbation (45% translation, 30% continuous rotation, 15% 90-deg snap)
-                const Transform oldTrans = state.transforms[idxA];
-                const Mat3 oldMat = state.mats[idxA];
-                const AABB oldBox = state.tightBoxes[idxA];
-                const long long oldTotalCollisions = state.totalCollisions;
-                const float oldVolume = state.volume;
-                const float oldEnergy = state.totalEnergy;
-
-                for (size_t j = 0; j < numMeshes; ++j) {
-                    oldRowA[j] = state.pairCollisions[idxA][j];
-                }
-
-                const Vec3 ext = meshes[idxA].bvh_root->box.max - meshes[idxA].bvh_root->box.min;
-                const float meshDiag = ext.length();
-                const float decay = std::max(0.005f, std::pow(1.0f - progress, 2.0f));
-
-                if (moveRoll < 0.45f) {
-                    // Pure translation
-                    std::normal_distribution<float> tStep(0.0f, meshDiag * 0.2f * decay);
-                    state.transforms[idxA].pos = state.transforms[idxA].pos + Vec3{tStep(rng), tStep(rng), tStep(rng)};
-                    const Vec3 delta = state.transforms[idxA].pos - oldTrans.pos;
-                    state.tightBoxes[idxA].min = oldBox.min + delta;
-                    state.tightBoxes[idxA].max = oldBox.max + delta;
-                } else if (moveRoll < 0.75f) {
-                    // Pure continuous rotation
-                    std::normal_distribution<float> rStep(0.0f, 45.0f * decay);
-                    state.transforms[idxA].rot = state.transforms[idxA].rot + Vec3{rStep(rng), rStep(rng), rStep(rng)};
-                    state.mats[idxA] = state.transforms[idxA].getMatrix();
-                    state.tightBoxes[idxA] = computeTightAABB(meshes[idxA], state.mats[idxA], state.transforms[idxA].pos);
-                } else {
-                    // Discrete 90-degree rotation around X, Y, or Z
-                    const int axis = static_cast<int>(rng() % 3);
-                    const float deltaAngle = (rng() % 2 == 0) ? 90.0f : -90.0f;
-                    if (axis == 0) state.transforms[idxA].rot.x += deltaAngle;
-                    else if (axis == 1) state.transforms[idxA].rot.y += deltaAngle;
-                    else state.transforms[idxA].rot.z += deltaAngle;
-
-                    state.mats[idxA] = state.transforms[idxA].getMatrix();
-                    state.tightBoxes[idxA] = computeTightAABB(meshes[idxA], state.mats[idxA], state.transforms[idxA].pos);
-                }
-
-                for (size_t j = 0; j < numMeshes; ++j) {
-                    if (j == idxA) continue;
-                    state.totalCollisions -= state.pairCollisions[idxA][j];
-                    const long long c = computePairCollisions(
-                        meshes[idxA], state.mats[idxA], state.transforms[idxA].pos, state.tightBoxes[idxA],
-                        meshes[j], state.mats[j], state.transforms[j].pos, state.tightBoxes[j]);
-                    state.pairCollisions[idxA][j] = state.pairCollisions[j][idxA] = c;
-                    state.totalCollisions += c;
-                }
-
-                recomputeTotalEnergy(state, penaltyWeight, progress);
-                const float diff = state.totalEnergy - oldEnergy;
-
-                if (!(diff < 0.0f || std::exp(-diff / temperature) > unitDist(rng))) {
-                    state.transforms[idxA] = oldTrans;
-                    state.mats[idxA] = oldMat;
-                    state.tightBoxes[idxA] = oldBox;
-                    for (size_t j = 0; j < numMeshes; ++j) {
-                        state.pairCollisions[idxA][j] = state.pairCollisions[j][idxA] = oldRowA[j];
-                    }
-                    state.totalCollisions = oldTotalCollisions;
-                    state.volume = oldVolume;
-                    state.totalEnergy = oldEnergy;
-                }
+            if (positional) {
+                inputs.push_back(arg);
+                continue;
             }
-
-            if (state.totalCollisions == 0 && state.volume < bestVolume) {
-                bestVolume = state.volume;
-                bestZeroCollState = state.transforms;
+            if (arg == "--") {
+                positional = true;
+                continue;
             }
-            if (state.totalCollisions < fallbackCollisions ||
-                (state.totalCollisions == fallbackCollisions && state.volume < fallbackVolume)) {
-                fallbackCollisions = state.totalCollisions;
-                fallbackVolume = state.volume;
-                fallbackState = state.transforms;
+            if (arg == "-h" || arg == "--help") {
+                usage();
+                return 0;
             }
-
-            if (++iteration % 100 == 0) {
-                const std::chrono::duration<float> elapsed = std::chrono::steady_clock::now() - startTime;
-                progress = std::min(1.0f, elapsed.count() / maxTimeSeconds);
-                temperature = std::pow(startTemp, 1.0f - progress) * std::pow(endTemp, progress);
-
-                // Refresh current totalEnergy so it stays synchronized with the updated progress weight
-                recomputeTotalEnergy(state, penaltyWeight, progress);
-
-                // One flushed line per percent, so programs reading stdout get live progress
-                const int percent = static_cast<int>(progress * 100);
-                if (percent != reportedPercent) {
-                    reportedPercent = percent;
-                    std::cout << "Prog: " << percent << "% | Iter: " << iteration << " | Temp: " << temperature
-                              << " | Vol: " << state.volume
-                              << " | BestVol: " << (bestVolume < std::numeric_limits<float>::max() ? bestVolume : -1.0f)
-                              << " | Coll: " << state.totalCollisions << std::endl;
+            if (arg == "-v" || arg == "--version") {
+                std::cout << "3D Packing Solver " << PACKER_VERSION << '\n';
+                return 0;
+            }
+            if (arg == "--width" || arg == "-w")
+                options.size.x = number(value());
+            else if (arg == "--height" || arg == "-H")
+                options.size.z = number(value());
+            else if (arg == "--length" || arg == "-l")
+                options.size.y = number(value());
+            else if (arg == "--gap" || arg == "-g")
+                options.gap = number(value());
+            else if (arg == "-t")
+                options.seconds = number(value());
+            else if (arg == "-o")
+                objFile = value();
+            else if (arg == "-m")
+                transformsFile = value();
+            else if (arg == "--manifest")
+                manifestFile = value();
+            else if (arg == "--algorithm") {
+                const auto name = value();
+                if (name == "anneal")
+                    options.algorithm = PackingAlgorithm::Anneal;
+                else if (name == "constructive")
+                    options.algorithm = PackingAlgorithm::Constructive;
+                else
+                    throw std::invalid_argument("Unknown algorithm: " + name);
+            } else if (arg == "--seed") {
+                const std::string text = value();
+                size_t used = 0;
+                if (text.empty() || text[0] == '-')
+                    throw std::invalid_argument("Invalid seed");
+                const auto seed = std::stoull(text, &used);
+                if (used != text.size() || seed > std::numeric_limits<uint32_t>::max())
+                    throw std::invalid_argument("Invalid seed");
+                options.seed = static_cast<uint32_t>(seed);
+            } else if (!arg.empty() && arg[0] == '-')
+                throw std::invalid_argument("Unknown option: " + arg);
+            else
+                inputs.push_back(arg);
+        }
+        if (options.size.x <= 0 || options.size.y <= 0 || options.size.z <= 0)
+            throw std::invalid_argument("Specify positive --width, --height and --length");
+        if (options.gap < 0 || options.seconds <= 0)
+            throw std::invalid_argument("Gap must be nonnegative and time positive");
+        if (inputs.empty())
+            throw std::invalid_argument("At least one input OBJ file is required");
+        if (objFile.empty() && transformsFile.empty())
+            objFile = "output.obj";
+        if (manifestFile.empty())
+            manifestFile = (transformsFile.empty() ? objFile : transformsFile) + ".json";
+        std::vector<Mesh> meshes;
+        for (const auto &input : inputs) {
+            std::cout << "Loading " << input << "...\n";
+            loadAndPrepareMesh(input, meshes);
+        }
+        const PackingResult result = packMeshes(meshes, options, [](int percent, size_t bins, size_t target) {
+            std::cout << "Prog: " << percent << "% | Trying: " << target << " | BestBins: " << bins << std::endl;
+        });
+        const double stride = binDisplayStride(options);
+        std::vector<std::string> binFiles(result.binCount);
+        if (!objFile.empty()) {
+            if (result.binCount == 1)
+                binFiles[0] = objFile;
+            else
+                for (size_t b = 0; b < result.binCount; ++b) {
+                    std::ostringstream suffix;
+                    suffix << "-bin-" << std::setw(3) << std::setfill('0') << b + 1 << ".obj";
+                    const fs::path p = objFile;
+                    binFiles[b] = (p.parent_path() / (p.stem().string() + suffix.str())).string();
                 }
-            }
         }
-
-        const bool foundZeroCollision = (bestVolume < std::numeric_limits<float>::max());
-        std::vector<Transform> finalTransforms = foundZeroCollision ? bestZeroCollState : fallbackState;
-
-        // Moving every mesh together doesn't change the energy, so the arrangement drifts during annealing.
-        // Center its bounding box on the origin to give a stable result.
-        AABB packedBox;
-        for (size_t i = 0; i < numMeshes; ++i) {
-            packedBox.expand(computeTightAABB(meshes[i], finalTransforms[i].getMatrix(), finalTransforms[i].pos));
+        std::vector<std::string> outputs = {manifestFile};
+        if (!objFile.empty())
+            outputs.push_back(objFile);
+        if (!transformsFile.empty())
+            outputs.push_back(transformsFile);
+        if (result.binCount > 1)
+            for (const auto &file : binFiles)
+                if (!file.empty())
+                    outputs.push_back(file);
+        // Never overwrite an input mesh, or one output with another output.
+        for (size_t i = 0; i < outputs.size(); ++i) {
+            const auto path = fs::weakly_canonical(outputs[i]);
+            for (const auto &input : inputs)
+                if (path == fs::weakly_canonical(input))
+                    throw std::invalid_argument("Output would overwrite input: " + outputs[i]);
+            for (size_t j = 0; j < i; ++j)
+                if (path == fs::weakly_canonical(outputs[j]))
+                    throw std::invalid_argument("Output paths must be distinct");
         }
-        const Vec3 packedCenter = packedBox.center();
-        for (Transform& t : finalTransforms) {
-            t.pos = t.pos - packedCenter;
+        if (!objFile.empty()) {
+            writeObj(objFile, meshes, result, stride);
+            if (result.binCount > 1)
+                for (size_t b = 0; b < result.binCount; ++b)
+                    writeObj(binFiles[b], meshes, result, 0, b);
         }
-
-        if (!outputFile.empty()) {
-            std::ofstream out(outputFile);
-            if (!out.is_open()) {
-                std::cerr << "Failed to open output file: " << outputFile << "\n";
-                return 1;
-            }
-
-            int vOffset = 1;
-            for (size_t i = 0; i < meshes.size(); ++i) {
-                out << "o Object_" << i << "\n";
-                const Mat3 mat = finalTransforms[i].getMatrix();
-
-                for (const Vec3& v : meshes[i].vertices) {
-                    const Vec3 tv = mat.transform(v) + finalTransforms[i].pos;
-                    out << "v " << tv.x << " " << tv.y << " " << tv.z << "\n";
-                }
-
-                for (size_t j = 0; j < meshes[i].indices.size(); j += 3) {
-                    out << "f " << meshes[i].indices[j] + vOffset << " " << meshes[i].indices[j + 1] + vOffset << " "
-                        << meshes[i].indices[j + 2] + vOffset << "\n";
-                }
-
-                vOffset += static_cast<int>(meshes[i].vertices.size());
-            }
-        }
-
         if (!transformsFile.empty()) {
-            std::ofstream out(transformsFile);
-            if (!out.is_open()) {
-                std::cerr << "Failed to open transforms file: " << transformsFile << "\n";
-                return 1;
-            }
-
-            // Maps an input vertex v to R * (v - centroid) + pos, written as [R | pos - R * centroid]
-            out << std::setprecision(9);
+            auto out = output(transformsFile);
             for (size_t i = 0; i < meshes.size(); ++i) {
-                const Mat3 mat = finalTransforms[i].getMatrix();
-                const Vec3 t = finalTransforms[i].pos - mat.transform(meshes[i].centroid);
-                const float tRow[3] = {t.x, t.y, t.z};
-                for (int r = 0; r < 3; ++r) {
-                    out << mat.m[r][0] << " " << mat.m[r][1] << " " << mat.m[r][2] << " " << tRow[r]
-                        << (r < 2 ? " " : "\n");
-                }
+                const auto values = matrix(meshes[i], result.placements[i], result.placements[i].bin * stride);
+                for (size_t j = 0; j < values.size(); ++j)
+                    out << values[j] << (j + 1 == values.size() ? '\n' : ' ');
             }
+            out.close();
         }
-
-        std::string savedTo = outputFile;
-        if (!transformsFile.empty()) {
-            savedTo += (savedTo.empty() ? "" : " and ") + transformsFile;
+        auto out = output(manifestFile);
+        out << "{\n  \"schema_version\": 1,\n  \"width\": " << options.size.x << ", \"height\": " << options.size.z
+            << ", \"length\": " << options.size.y << ", \"gap\": " << options.gap
+            << ",\n  \"bin_count\": " << result.binCount << ",\n  \"algorithm\": "
+            << jsonString(options.algorithm == PackingAlgorithm::Anneal ? "anneal" : "constructive")
+            << ",\n  \"baseline_bin_count\": " << result.baselineBinCount
+            << ",\n  \"baseline_timed_out\": " << (result.baselineTimedOut ? "true" : "false")
+            << ",\n  \"baseline_seconds\": " << result.baselineSeconds << ",\n  \"iterations\": " << result.iterations
+            << ", \"restarts\": " << result.restarts << ",\n  \"search_seconds\": " << result.searchSeconds
+            << ", \"preparation_seconds\": " << result.preparationSeconds
+            << ",\n  \"used_fallback\": " << (result.usedFallback ? "true" : "false")
+            << ",\n  \"attempted_bin_counts\": [";
+        for (size_t i = 0; i < result.attemptedBinCounts.size(); ++i)
+            out << result.attemptedBinCounts[i] << (i + 1 == result.attemptedBinCounts.size() ? "" : ", ");
+        out << "],\n  \"bins\": [\n";
+        for (size_t b = 0; b < result.binCount; ++b) {
+            out << "    {\"id\": " << b << ", \"display_offset\": [" << b * stride << ", 0, 0], \"obj\": ";
+            if (binFiles[b].empty())
+                out << "null";
+            else
+                out << jsonString(fs::absolute(binFiles[b]).lexically_normal().string());
+            out << '}' << (b + 1 == result.binCount ? "\n" : ",\n");
         }
-
-        if (!foundZeroCollision) {
-            std::cout << "Done! (" << iteration << " iterations). No 0-collision configuration found in time budget. "
-                      << "Saved lowest-collision state (Collisions: " << fallbackCollisions
-                      << ", Vol: " << fallbackVolume << ") to " << savedTo << std::endl;
-        } else {
-            std::cout << "Done! (" << iteration << " iterations). Final best 0-collision volume: " << bestVolume
-                      << ". Saved to " << savedTo << std::endl;
+        out << "  ],\n  \"placements\": [\n";
+        for (size_t i = 0; i < meshes.size(); ++i) {
+            out << "    {\"input_index\": " << i << ", \"input\": " << jsonString(inputs[i])
+                << ", \"bin\": " << result.placements[i].bin << ", \"matrix\": [";
+            const auto values = matrix(meshes[i], result.placements[i]);
+            for (size_t j = 0; j < values.size(); ++j)
+                out << values[j] << (j + 1 == values.size() ? "" : ", ");
+            out << "]}" << (i + 1 == meshes.size() ? "\n" : ",\n");
         }
+        out << "  ]\n}\n";
+        out.close();
+        if (result.usedFallback)
+            std::cout << "Search budget exhausted; returning the validated greedy fallback.\n";
+        std::cout << "Done! Packed " << meshes.size() << " meshes into " << result.binCount << " container(s), gap "
+                  << options.gap
+                  << ". Best feasible result found; global minimum is not guaranteed. Manifest: " << manifestFile
+                  << '\n';
         return 0;
-    } catch (const std::exception& ex) {
-        std::cerr << "Error: " << ex.what() << "\n";
+    } catch (const std::exception &error) {
+        std::cerr << "Error: " << error.what() << '\n';
         return 1;
     }
 }

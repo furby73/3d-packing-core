@@ -2,25 +2,26 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 struct Vec3 {
-    float x;
-    float y;
-    float z;
+    double x;
+    double y;
+    double z;
 
-    Vec3 operator+(const Vec3& o) const { return {x + o.x, y + o.y, z + o.z}; }
-    Vec3 operator-(const Vec3& o) const { return {x - o.x, y - o.y, z - o.z}; }
-    Vec3 operator*(float s) const { return {x * s, y * s, z * s}; }
+    Vec3 operator+(const Vec3 &o) const { return {x + o.x, y + o.y, z + o.z}; }
+    Vec3 operator-(const Vec3 &o) const { return {x - o.x, y - o.y, z - o.z}; }
+    Vec3 operator*(double s) const { return {x * s, y * s, z * s}; }
 
-    float lengthSq() const { return x * x + y * y + z * z; }
-    float length() const { return std::sqrt(lengthSq()); }
+    double lengthSq() const { return x * x + y * y + z * z; }
+    double length() const { return std::sqrt(lengthSq()); }
 };
 
-inline float dot(const Vec3& a, const Vec3& b) {
+inline double dot(const Vec3 &a, const Vec3 &b) {
     return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
-inline Vec3 cross(const Vec3& a, const Vec3& b) {
+inline Vec3 cross(const Vec3 &a, const Vec3 &b) {
     return {
         a.y * b.z - a.z * b.y,
         a.z * b.x - a.x * b.z,
@@ -29,9 +30,9 @@ inline Vec3 cross(const Vec3& a, const Vec3& b) {
 }
 
 struct Mat3 {
-    float m[3][3];
+    double m[3][3];
 
-    Vec3 transform(const Vec3& v) const {
+    Vec3 transform(const Vec3 &v) const {
         return {
             m[0][0] * v.x + m[0][1] * v.y + m[0][2] * v.z,
             m[1][0] * v.x + m[1][1] * v.y + m[1][2] * v.z,
@@ -40,7 +41,7 @@ struct Mat3 {
     }
 
     // Applies R^T * v (inverse rotation for orthonormal matrices)
-    Vec3 transposeTransform(const Vec3& v) const {
+    Vec3 transposeTransform(const Vec3 &v) const {
         return {
             m[0][0] * v.x + m[1][0] * v.y + m[2][0] * v.z,
             m[0][1] * v.x + m[1][1] * v.y + m[2][1] * v.z,
@@ -49,7 +50,7 @@ struct Mat3 {
     }
 
     // Computes R_A^T * R_B
-    Mat3 transposeMultiply(const Mat3& o) const {
+    Mat3 transposeMultiply(const Mat3 &o) const {
         Mat3 res{};
         for (int i = 0; i < 3; ++i) {
             for (int j = 0; j < 3; ++j) {
@@ -61,21 +62,21 @@ struct Mat3 {
 };
 
 struct Transform {
-    Vec3 pos = {0.0f, 0.0f, 0.0f};
-    Vec3 rot = {0.0f, 0.0f, 0.0f};
+    Vec3 pos = {0.0, 0.0, 0.0};
+    Vec3 rot = {0.0, 0.0, 0.0};
 
     Mat3 getMatrix() const {
-        constexpr float kDegToRad = 3.14159265358979323846f / 180.0f;
-        const float rx = rot.x * kDegToRad;
-        const float ry = rot.y * kDegToRad;
-        const float rz = rot.z * kDegToRad;
+        constexpr double kDegToRad = 3.14159265358979323846 / 180.0;
+        const double rx = rot.x * kDegToRad;
+        const double ry = rot.y * kDegToRad;
+        const double rz = rot.z * kDegToRad;
 
-        const float cx = std::cos(rx);
-        const float sx = std::sin(rx);
-        const float cy = std::cos(ry);
-        const float sy = std::sin(ry);
-        const float cz = std::cos(rz);
-        const float sz = std::sin(rz);
+        const double cx = std::cos(rx);
+        const double sx = std::sin(rx);
+        const double cy = std::cos(ry);
+        const double sy = std::sin(ry);
+        const double cz = std::cos(rz);
+        const double sz = std::sin(rz);
 
         return Mat3{{
             {cy * cz, -cy * sz, sy},
@@ -86,10 +87,12 @@ struct Transform {
 };
 
 struct AABB {
-    Vec3 min = {1e30f, 1e30f, 1e30f};
-    Vec3 max = {-1e30f, -1e30f, -1e30f};
+    Vec3 min = {std::numeric_limits<double>::infinity(), std::numeric_limits<double>::infinity(),
+                std::numeric_limits<double>::infinity()};
+    Vec3 max = {-std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity(),
+                -std::numeric_limits<double>::infinity()};
 
-    void expand(const Vec3& p) {
+    void expand(const Vec3 &p) {
         min.x = std::min(min.x, p.x);
         min.y = std::min(min.y, p.y);
         min.z = std::min(min.z, p.z);
@@ -98,31 +101,26 @@ struct AABB {
         max.z = std::max(max.z, p.z);
     }
 
-    void expand(const AABB& o) {
+    void expand(const AABB &o) {
         expand(o.min);
         expand(o.max);
     }
 
-    Vec3 center() const {
-        return (min + max) * 0.5f;
-    }
+    Vec3 center() const { return (min + max) * 0.5; }
 
-    float volume() const {
+    double volume() const {
         if (max.x < min.x || max.y < min.y || max.z < min.z) {
-            return 0.0f;
+            return 0.0;
         }
         return (max.x - min.x) * (max.y - min.y) * (max.z - min.z);
     }
 
-    bool contains(const Vec3& p) const {
-        return (p.x >= min.x && p.x <= max.x) &&
-               (p.y >= min.y && p.y <= max.y) &&
-               (p.z >= min.z && p.z <= max.z);
+    bool contains(const Vec3 &p) const {
+        return (p.x >= min.x && p.x <= max.x) && (p.y >= min.y && p.y <= max.y) && (p.z >= min.z && p.z <= max.z);
     }
 
-    bool intersects(const AABB& o) const {
-        return (min.x <= o.max.x && max.x >= o.min.x) &&
-               (min.y <= o.max.y && max.y >= o.min.y) &&
+    bool intersects(const AABB &o) const {
+        return (min.x <= o.max.x && max.x >= o.min.x) && (min.y <= o.max.y && max.y >= o.min.y) &&
                (min.z <= o.max.z && max.z >= o.min.z);
     }
 };

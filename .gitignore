@@ -12,3 +12,7 @@ out/
 dist/
 blender/mesh_packer/bin/
 __pycache__/
+
+# Downloaded benchmark assets and local results
+benchmarks/data/
+benchmarks/results/

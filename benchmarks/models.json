@@ -1,0 +1,233 @@
+[
+  {
+    "name": "bunny_coarse",
+    "source_url": "https://graphics.stanford.edu/pub/3Dscanrep/bunny.tar.gz",
+    "archive_sha256": "a5720bd96d158df403d153381b8411a727a1d73cff2f33dc9b212d6f75455b84",
+    "member": "bunny/reconstruction/bun_zipper_res4.ply",
+    "obj_sha256": "dee315f8154741752545d8cf253d63ab2b8230688e28c45d99317a8aeacdbc2d",
+    "vertices": 453,
+    "triangles": 948,
+    "boundary_edges": 26,
+    "nonmanifold_edges": 70,
+    "watertight": false,
+    "winding_consistent": true,
+    "extents": [
+      1.0,
+      0.9799802613834044,
+      0.7563812766037072
+    ],
+    "scale": 6.609136268717001,
+    "original_bounds": [
+      [
+        -0.09314659982919693,
+        0.03362039849162102,
+        -0.056644000113010406
+      ],
+      [
+        0.058159101754426956,
+        0.18189699947834015,
+        0.05780079960823059
+      ]
+    ],
+    "volume": null,
+    "zero_area_faces": 0
+  },
+  {
+    "name": "bunny_medium",
+    "source_url": "https://graphics.stanford.edu/pub/3Dscanrep/bunny.tar.gz",
+    "archive_sha256": "a5720bd96d158df403d153381b8411a727a1d73cff2f33dc9b212d6f75455b84",
+    "member": "bunny/reconstruction/bun_zipper_res3.ply",
+    "obj_sha256": "6d4a9285f20cd5f37c03331d1681fc27d1417722381a72153f7213f8e562af94",
+    "vertices": 1887,
+    "triangles": 3851,
+    "boundary_edges": 60,
+    "nonmanifold_edges": 141,
+    "watertight": false,
+    "winding_consistent": true,
+    "extents": [
+      0.9999999999999999,
+      0.9748858003329565,
+      0.7735869337671556
+    ],
+    "scale": 6.439195647275693,
+    "original_bounds": [
+      [
+        -0.09436430037021637,
+        0.03341430053114891,
+        -0.06167209893465042
+      ],
+      [
+        0.06093459948897362,
+        0.184812992811203,
+        0.058465100824832916
+      ]
+    ],
+    "volume": null,
+    "zero_area_faces": 0
+  },
+  {
+    "name": "bunny_full",
+    "source_url": "https://graphics.stanford.edu/pub/3Dscanrep/bunny.tar.gz",
+    "archive_sha256": "a5720bd96d158df403d153381b8411a727a1d73cff2f33dc9b212d6f75455b84",
+    "member": "bunny/reconstruction/bun_zipper.ply",
+    "obj_sha256": "df0fd9e67d6fe232ed28b2a2a288024cb20d332425b1a41d38dc32e8eed503e3",
+    "vertices": 34834,
+    "triangles": 69451,
+    "boundary_edges": 223,
+    "nonmanifold_edges": 0,
+    "watertight": false,
+    "winding_consistent": true,
+    "extents": [
+      1.0,
+      0.9912305576639883,
+      0.7750422226205674
+    ],
+    "scale": 6.422648838625513,
+    "original_bounds": [
+      [
+        -0.09468989819288254,
+        0.03298740088939667,
+        -0.061873599886894226
+      ],
+      [
+        0.06100910156965256,
+        0.1873210072517395,
+        0.05879969894886017
+      ]
+    ],
+    "volume": null,
+    "zero_area_faces": 0
+  },
+  {
+    "name": "dragon",
+    "source_url": "https://graphics.stanford.edu/pub/3Dscanrep/dragon/dragon_recon.tar.gz",
+    "archive_sha256": "74ac1d90989c9b1732edee82d57e9ce71452144cf4355f108d8c9c616d28d02f",
+    "member": "dragon_recon/dragon_vrip_res4.ply",
+    "obj_sha256": "b2e72f8a65afede93ea824c9d91874ef762325dbbc4b89046a68bc7181567a2a",
+    "vertices": 5203,
+    "triangles": 11102,
+    "boundary_edges": 0,
+    "nonmanifold_edges": 803,
+    "watertight": false,
+    "winding_consistent": true,
+    "extents": [
+      1.0,
+      0.7075160862670092,
+      0.4470066508013902
+    ],
+    "scale": 4.930463310865464,
+    "original_bounds": [
+      [
+        -0.10758499801158905,
+        0.0528440997004509,
+        -0.04983599856495857
+      ],
+      [
+        0.09523569792509079,
+        0.19634300470352173,
+        0.04082620143890381
+      ]
+    ],
+    "volume": null,
+    "zero_area_faces": 0
+  },
+  {
+    "name": "buddha",
+    "source_url": "https://graphics.stanford.edu/pub/3Dscanrep/happy/happy_recon.tar.gz",
+    "archive_sha256": "409cd294efbfd8244e15a382b95a9423f153b7776e736c9b09f19ec9d3c10ed0",
+    "member": "happy_recon/happy_vrip_res4.ply",
+    "obj_sha256": "8b5f085872e7b0ac81a32e5b85f944a47e58da2ed20f0bcdd42d01a82e32227f",
+    "vertices": 7102,
+    "triangles": 15536,
+    "boundary_edges": 0,
+    "nonmanifold_edges": 1341,
+    "watertight": false,
+    "winding_consistent": true,
+    "extents": [
+      0.41003669311264773,
+      1.0,
+      0.410370839528678
+    ],
+    "scale": 5.062750214926287,
+    "original_bounds": [
+      [
+        -0.04596929997205734,
+        0.05005389824509621,
+        -0.04726500064134598
+      ],
+      [
+        0.035021599382162094,
+        0.24757499992847443,
+        0.03379189968109131
+      ]
+    ],
+    "volume": null,
+    "zero_area_faces": 0
+  },
+  {
+    "name": "drill",
+    "source_url": "https://graphics.stanford.edu/pub/3Dscanrep/drill.tar.gz",
+    "archive_sha256": "2da2acaba36903a9893c920c11506e1bd01c531bdf738d037bc505b313df5e1b",
+    "member": "drill/reconstruction/drill_shaft_vrip.ply",
+    "obj_sha256": "b83d6ecbac1e638e0c689a44fa921bb0d8b68620cb8801cff52cd484e77a32d8",
+    "vertices": 1960,
+    "triangles": 3855,
+    "boundary_edges": 67,
+    "nonmanifold_edges": 0,
+    "watertight": false,
+    "winding_consistent": true,
+    "extents": [
+      0.0751813513873344,
+      1.0,
+      0.11482816830414451
+    ],
+    "scale": 38.05030368183035,
+    "original_bounds": [
+      [
+        -0.00030314098694361746,
+        0.11719900369644165,
+        0.013046500273048878
+      ],
+      [
+        0.001672700047492981,
+        0.14348000288009644,
+        0.016064299270510674
+      ]
+    ],
+    "volume": null,
+    "zero_area_faces": 0
+  },
+  {
+    "name": "spot",
+    "source_url": "https://www.cs.cmu.edu/~kmcrane/Projects/ModelRepository/spot.zip",
+    "archive_sha256": "1d4082da4e940f6a4cfdf648fd77e1647ac613c618dbff933f1ba23fad254608",
+    "member": "spot/spot_triangulated.obj",
+    "obj_sha256": "7f42f9efdccee153e658793e41c41b8f383091f51bcce23e4d03f4d7b09ce8c6",
+    "vertices": 2930,
+    "triangles": 5856,
+    "boundary_edges": 0,
+    "nonmanifold_edges": 0,
+    "watertight": true,
+    "winding_consistent": true,
+    "extents": [
+      0.5489836772494935,
+      0.9840043913851083,
+      0.9999999999999999
+    ],
+    "scale": 0.5821030101128756,
+    "original_bounds": [
+      [
+        -0.471552,
+        -0.736784,
+        -0.668909
+      ],
+      [
+        0.471552,
+        0.953646,
+        1.049
+      ]
+    ],
+    "volume": 0.14167084478826736,
+    "zero_area_faces": 0
+  }
+]

@@ -1,0 +1,10 @@
+[
+  {"name":"bunny6_coarse", "models":["bunny_coarse","bunny_coarse","bunny_coarse","bunny_coarse","bunny_coarse","bunny_coarse"], "size":[1.35,1.35,1.35], "gap":0.02},
+  {"name":"bunny8_medium", "models":["bunny_medium","bunny_medium","bunny_medium","bunny_medium","bunny_medium","bunny_medium","bunny_medium","bunny_medium"], "size":[1.8,1.6,1.3], "gap":0.02},
+  {"name":"bunny6_full", "models":["bunny_full","bunny_full","bunny_full","bunny_full","bunny_full","bunny_full"], "size":[1.5,1.5,1.5], "gap":0.02},
+  {"name":"dragon8", "models":["dragon","dragon","dragon","dragon","dragon","dragon","dragon","dragon"], "size":[1.5,1.5,1.5], "gap":0.02},
+  {"name":"buddha10", "models":["buddha","buddha","buddha","buddha","buddha","buddha","buddha","buddha","buddha","buddha"], "size":[1.2,1.2,1.2], "gap":0.02},
+  {"name":"spot8", "models":["spot","spot","spot","spot","spot","spot","spot","spot"], "size":[1.5,1.5,1.5], "gap":0.02},
+  {"name":"mixed10", "models":["bunny_medium","dragon","buddha","drill","spot","bunny_medium","dragon","buddha","drill","spot"], "size":[1.5,1.5,1.5], "gap":0.02},
+  {"name":"mixed10_gap", "models":["bunny_medium","dragon","buddha","drill","spot","bunny_medium","dragon","buddha","drill","spot"], "size":[1.5,1.5,1.5], "gap":0.08}
+]

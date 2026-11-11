@@ -4,7 +4,7 @@ id = "mesh_packer"
 # Replaced with the release tag's version by blender/build_extension.py
 version = "0.0.0"
 name = "Mesh Packer"
-tagline = "Pack every mesh in the scene tightly without overlaps"
+tagline = "Pack meshes into sized containers with part clearance"
 maintainer = "furby73"
 type = "add-on"
 
